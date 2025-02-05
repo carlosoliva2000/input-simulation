@@ -40,7 +40,7 @@ except Exception as e:
     exit(1)
 
 
-format_str = '%(asctime)s - %(levelname)s - %(message)s'
+format_str = "%(asctime)s - %(funcName)s - %(levelname)s - %(message)s"
 formatter = logging.Formatter(format_str)
 logger = logging.getLogger(__name__)
 
@@ -57,10 +57,28 @@ example:
   multiple clicks  clicker.py 150,200 400,500 200,100
 """
 
-def click(coordinates: Tuple[int, int], sleep_time: float=0.0):
-    for x, y in coordinates:
-        pyautogui.click(x, y)
-        logger.debug(f"Clicked on ({x}, {y})")
+def click(
+        coordinates: Tuple[str, int, int], 
+        sleep_time: float=0.0,
+        duration: float=0.0
+    ):
+    """Simulate a click on the given coordinates"""
+    btn_mapping = {
+        "L": pyautogui.LEFT, 
+        "R": pyautogui.RIGHT, 
+        "M": pyautogui.MIDDLE
+    }
+    tweening_functions = [
+        pyautogui.easeInOutCirc,
+        pyautogui.easeOutBack
+    ]
+    for btn, x, y in coordinates:
+        btn = btn_mapping[btn]
+        if duration > 0.0:
+            logger.debug(f"Moving mouse to ({x}, {y}) with duration {duration}")
+            pyautogui.moveTo(x, y, tween=random.choice(tweening_functions), duration=duration)
+        pyautogui.click(x, y, button=btn)
+        logger.debug(f"Clicked {btn} button on ({x}, {y})")
         if sleep_time > 0.0:
             logger.debug(f"Waiting {sleep_time} seconds after the click.")
             time.sleep(sleep_time)
@@ -73,10 +91,19 @@ def parse_coordinates(coord_str: str) -> List[Tuple[int, int]]:
     coord_pairs = coord_str.split()
     for pair in coord_pairs:
         try:
-            x, y = map(int, pair.split(','))
-            coordinates.append((x, y))
-        except ValueError:
-            logger.error(f"Invalid format for coordinates {pair}")
+            parts = pair.split(',')
+            if len(parts) == 2:
+                btn, x, y = "L", *map(int, parts)
+            elif len(parts) == 3:
+                btn, x, y = parts
+                btn = btn.upper()
+                x, y = int(x), int(y)
+            else:
+                raise ValueError(f"Invalid format for coordinates {pair}")
+            logger.debug(f"Parts: {parts} to -> button: {btn}, x: {x}, y: {y}")
+            coordinates.append((btn, x, y))
+        except ValueError as e:
+            logger.error(f"Invalid format for coordinates {pair}: {e}")
             exit(1)
     return coordinates
 
@@ -85,8 +112,8 @@ def main():
     parser = argparse.ArgumentParser(
         prog="input-simulation",
         description="Simulate input such as clicking, moving the mouse or typing", 
-        epilog=example, 
-        formatter_class=argparse.RawDescriptionHelpFormatter
+        # epilog=example, 
+        # formatter_class=argparse.RawDescriptionHelpFormatter
     )
 
     # Subcommands
@@ -101,6 +128,7 @@ def main():
     )
     click_parser.add_argument("coordinates", type=str, help="Coordinates in the format 'x,y' o 'x y' if single click, or a list in the format 'x,y x,y x,y' if multiple clicks.")
     click_parser.add_argument("--sleep", type=float, help="Time in seconds (float) to sleep after each click.", default=0.0, required=False)
+    click_parser.add_argument("--duration", type=float, help="Time in seconds (float) to move the mouse to the given coordinates.", default=0.0, required=False)
     click_parser.add_argument("--debug", action="store_true", help="Enable debug mode.", required=False)
 
     args, unknown = parser.parse_known_args()
@@ -127,10 +155,12 @@ def main():
 
     if args.command == "click":
         coordinates = parse_coordinates(args.coordinates)
-        click(coordinates, args.sleep)
+        click(coordinates, args.sleep, args.duration)
     else:
         logger.error("Invalid command")
         exit(1)
+
+    logger.info("Finishing input-simulation")
 
 if __name__ == "__main__":
     main()
