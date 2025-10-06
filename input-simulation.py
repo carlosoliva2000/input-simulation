@@ -1,5 +1,4 @@
 import os
-import json
 import random
 import subprocess
 import string
@@ -12,10 +11,6 @@ import shlex
 from sys import exit
 from typing import Tuple, List, Union
 from logging.handlers import RotatingFileHandler
-
-
-MIN_TYPE_INTERVAL = 0.025  # Minimum interval between typed characters to avoid issues with some systems
-RECOMMENDED_TYPE_INTERVAL = 0.05  # Recommended interval between typed characters to avoid issues with some systems
 
 
 path = os.path.join(os.path.expanduser('~'), ".config", "input-simulation")
@@ -84,6 +79,13 @@ example:
   multiple actions      keyboard "S,1.5 T,'Hello World' K,Enter,2 T,/path/content.txt K,Ctrl+S" (sequence of actions, with quotes for strings when typing)
 """
 
+example_input = """
+example:
+  mouse and keyboard    input "100,200 R S,0.5 L,/path/to/image.png T,'Hello World' K,Enter,2 T,/path/content.txt K,Ctrl+S"
+  (sequence of mouse and keyboard actions, with quotes for strings when typing)
+  (see the help of mouse and keyboard commands for the format of each action and more examples)
+"""
+
 
 # Printable ASCII characters
 supported_chars = set(string.ascii_letters + string.digits + string.punctuation + " ")
@@ -95,7 +97,7 @@ def type_with_xdotool_single(text):
     subprocess.run(["xdotool", "type", "--clearmodifiers", text])
 
 
-def type_text(text, interval=0.0):
+def type_text(text, interval=0.05):
     buffer = ""
 
     def flush_buffer():
@@ -116,8 +118,8 @@ def type_text(text, interval=0.0):
     flush_buffer()
 
 
-def type_with_xdotool(text: str, interval=MIN_TYPE_INTERVAL):
-    if interval < MIN_TYPE_INTERVAL:
+def type_with_xdotool(text: str, interval=0.05):
+    if interval < 0.05:
         logger.debug(f"Interval {interval} too low, typing whole text at once.")
         pyperclip.copy(text)
         pyautogui.hotkey("ctrl", "v")
@@ -133,13 +135,15 @@ def type_with_xdotool(text: str, interval=MIN_TYPE_INTERVAL):
 
 
 def mouse_cmd(
-        actions: Tuple[str, Tuple],
-        sleep_time: float=0.0,
-        duration: float=0.0,
-        doubleclick_interval: float=0.1
-    ):
+    actions: Tuple[str, Tuple],
+    sleep_time: float=0.0,
+    duration: float=0.0,
+    doubleclick_interval: float=0.1,
+    confidence: float=0.8,
+    grayscale: bool=True
+):
     """Simulate a sequence of mouse movements and clicks, whether on coordinates or on images located on the screen."""
-    logger.debug(f"Starting mouse_cmd with actions: {actions}, sleep_time: {sleep_time}, duration: {duration}, doubleclick_interval: {doubleclick_interval}")
+    logger.debug(f"Starting mouse_cmd with actions: {actions}. Args: sleep_time={sleep_time}, duration={duration}, doubleclick_interval={doubleclick_interval}, confidence={confidence}, grayscale={grayscale}")
     btn_mapping = {
         "DOUBLELEFT": pyautogui.LEFT,
         "LEFT": pyautogui.LEFT, 
@@ -164,7 +168,7 @@ def mouse_cmd(
             elif len(args) == 1:  # Click on image
                 img_path = args[0]
                 logger.debug(f"Locating image on screen: {img_path}")
-                location = pyautogui.locateCenterOnScreen(img_path, confidence=0.8, grayscale=True)
+                location = pyautogui.locateCenterOnScreen(img_path, confidence=confidence, grayscale=grayscale)
                 if location is None:
                     logger.error(f"Image '{img_path}' not found on screen.")
                     exit(1)
@@ -198,11 +202,11 @@ def mouse_cmd(
 def keyboard_cmd(
     actions: Tuple[str, Union[str, Tuple]],
     sleep_time: float=0.0,
-    typing_interval: float=MIN_TYPE_INTERVAL,
+    typing_interval: float=0.05,
     press_interval: float=0.0
 ):
     """Simulate a sequence of keyboard key presses and typing."""
-    logger.debug(f"Starting keyboard_cmd with actions: {actions}, sleep_time: {sleep_time}, typing_interval: {typing_interval}, press_interval: {press_interval}")
+    logger.debug(f"Starting keyboard_cmd with actions: {actions}. Args: sleep_time={sleep_time}, typing_interval={typing_interval}, press_interval={press_interval}")
 
     for i, (action, args) in enumerate(actions):
         logger.debug(f"Processing action: {action} with args: {args}")
@@ -247,6 +251,33 @@ def keyboard_cmd(
             if sleep_time > 0.0 and i < len(actions) - 1:  # No sleep after the last action
                 logger.debug(f"Waiting {sleep_time} seconds after the keyboard action.")
                 time.sleep(sleep_time)
+
+
+def input_cmd(
+    actions: List[Tuple[str, Union[str, Tuple]]],
+    sleep_time: float=0.0,
+    duration: float=0.0,
+    doubleclick_interval: float=0.1,
+    confidence: float=0.8,
+    grayscale: bool=True,
+    typing_interval: float=0.05,
+    press_interval: float=0.0
+):
+    """Simulate a sequence of mouse and keyboard actions."""
+    logger.debug(f"Starting input_cmd with actions: {actions}. Args: sleep_time={sleep_time}, duration={duration}, doubleclick_interval={doubleclick_interval}, confidence={confidence}, grayscale={grayscale}, typing_interval={typing_interval}, press_interval={press_interval}")
+
+    for i, (action_type, action) in enumerate(actions):
+        if action_type == "MOUSE":
+            mouse_cmd(action, sleep_time, duration, doubleclick_interval)
+        elif action_type == "KEYBOARD":
+            keyboard_cmd(action, sleep_time, typing_interval, press_interval)
+        else:
+            logger.error(f"Unknown action type '{action_type}' in input_cmd.")
+            exit(1)
+        
+        if sleep_time > 0.0 and i < len(actions) - 1:  # No sleep after the last action
+            logger.debug(f"Waiting {sleep_time} seconds after the last action of type {action_type}.")
+            time.sleep(sleep_time)
 
 
 def validate_mouse_action(action: str) -> str:
@@ -353,11 +384,16 @@ def parse_mouse_actions(actions_str: str) -> List[Tuple[str, Tuple]]:
     return actions
 
 
-def parse_keyboard_actions(actions_str: str) -> List[Tuple[str, Union[str, Tuple]]]:
+def parse_keyboard_actions(actions_str: str, from_input=False) -> List[Tuple[str, Union[str, Tuple]]]:
     """Converts a string of keyboard actions into a list of tuples with action and arguments."""
     logger.debug(f"Parsing keyboard actions: {actions_str}")
     actions = []
-    actions_split = shlex.split(actions_str)  # To handle quoted strings with spaces
+
+    if not from_input:
+        actions_split = shlex.split(actions_str)  # To handle quoted strings with spaces
+    else:
+        actions_split = [actions_str]  # When called from input command, the whole string is one action
+    
     for item in actions_split:
         try:
             logger.debug(f"Processing item: {item}")
@@ -393,6 +429,31 @@ def parse_keyboard_actions(actions_str: str) -> List[Tuple[str, Union[str, Tuple
     return actions
 
 
+def parse_input_actions(actions_str: str) -> List[Tuple[str, Union[str, Tuple]]]:
+    """Converts a string of mixed mouse and keyboard actions into a list of tuples with action type and action."""
+    logger.debug(f"Parsing input actions: {actions_str}")
+    combined_actions = []
+    actions_split = shlex.split(actions_str)
+
+    # logger.debug(f"Actions split: {actions_split}")
+    for item in actions_split:
+        try:
+            logger.debug(f"Processing item: {item}")
+            item_split = item.split(",", 1)
+            if len(item_split) == 1 or item_split[0].upper() in ["L", "LEFT", "R", "RIGHT", "W", "MIDDLE", "LL", "DOUBLELEFT", "M", "MOVE", "S", "SLEEP"]:
+                mouse_action = parse_mouse_actions(item)
+                combined_actions.append(("MOUSE", mouse_action))
+            elif item.split(",", 1)[0].upper() in ["K", "KEY", "T", "TYPE", "TF", "TYPEFILE", "S", "SLEEP"]:
+                keyboard_action = parse_keyboard_actions(item, from_input=True)
+                combined_actions.append(("KEYBOARD", keyboard_action))
+            else:
+                raise ValueError("Unknow action. Use mouse or keyboard actions.")
+        except ValueError as e:
+            logger.error(f"Invalid format for action {item}: {e}")
+            exit(1)
+    return combined_actions
+
+
 def check_mouse_args(args) -> bool:
     """Check if the arguments for mouse command are valid."""
     if args.doubleclick_interval < 0.0:
@@ -412,8 +473,8 @@ def check_keyboard_args(args) -> bool:
     if args.typing_interval < 0.0:
         logger.error("Typing interval cannot be negative.")
         return False
-    if args.typing_interval < MIN_TYPE_INTERVAL:
-        logger.warning(f"Typing interval too low (less than {MIN_TYPE_INTERVAL}s). Setting to type the whole string at once.")
+    if args.typing_interval < 0.05:
+        logger.warning(f"Typing interval too low (less than {0.05}s). Setting to type the whole string at once.")
     if args.press_interval < 0.0:
         logger.error("Press interval cannot be negative.")
         return False
@@ -475,9 +536,31 @@ def main():
     keyboard_parser.add_argument("--typing-interval", type=float, help="Time in seconds (float) between each character when typing a string. Defaults to 0.05s. "
                                  "Minimum is 0.025s, lower values will type the whole string at once. "
                                  "Values lower than 0.05s may cause issues on some systems (such as missing characters).", 
-                                 default=RECOMMENDED_TYPE_INTERVAL, required=False)
+                                 default=0.05, required=False)
     keyboard_parser.add_argument("--press-interval", type=float, help="Time in seconds (float) between each key press when pressing keys multiple times. Defaults to 0.0s", default=0.0, required=False)
     keyboard_parser.add_argument("--debug", action="store_true", help="Enable debug mode.", required=False)
+
+    # Input command (combined mouse and keyboard)
+    input_parser = subparsers.add_parser(
+        "input", 
+        help="Simulate a sequence of mouse and keyboard actions.",
+        epilog=example_input,
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    input_parser.add_argument("actions", type=str, help="The sequence of actions to follow: mouse movements, clicks, key presses, typing and sleeps. "
+                              "See the help of mouse and keyboard commands for the format of each action. ")
+    input_parser.add_argument("--sleep", type=float, help="Time in seconds (float) to sleep after each action. If a sleep action is used in the sequence of actions, it overrides this argument. Defaults to 0.0s", default=0.0, required=False)
+    input_parser.add_argument("--doubleclick-interval", type=float, help="Time in seconds (float) between clicks for a double click. Defaults to 0.1s.", default=0.1, required=False)
+    input_parser.add_argument("--duration", type=float, help="Time in seconds (float) to move the mouse to the given coordinates. Defaults to 0.0s", default=0.0, required=False)
+    input_parser.add_argument("--confidence", type=float, help="Confidence level (0.0 to 1.0) for image recognition. Defaults to 0.8.", default=0.8, required=False)
+    input_parser.add_argument("--grayscale", action="store_true", help="Use grayscale for image recognition. This is the default option.", default=True, required=False)
+    input_parser.add_argument("--no-grayscale", action="store_false", dest="grayscale", help="Do not use grayscale for image recognition.", required=False)
+    input_parser.add_argument("--typing-interval", type=float, help="Time in seconds (float) between each character when typing a string. Defaults to 0.05s. "
+                                 "Minimum is 0.025s, lower values will type the whole string at once. "
+                                 "Values lower than 0.05s may cause issues on some systems (such as missing characters).", 
+                                 default=0.05, required=False)
+    input_parser.add_argument("--press-interval", type=float, help="Time in seconds (float) between each key press when pressing keys multiple times. Defaults to 0.0s", default=0.0, required=False)
+    input_parser.add_argument("--debug", action="store_true", help="Enable debug mode.", required=False)
 
 
     args, unknown = parser.parse_known_args()
@@ -517,6 +600,12 @@ def main():
             exit(1)
         keyboard_actions = parse_keyboard_actions(args.actions)
         keyboard_cmd(keyboard_actions, args.sleep, args.typing_interval, args.press_interval)
+    elif args.command == "input":
+        if not check_mouse_args(args) or not check_keyboard_args(args):
+            exit(1)
+        combined_actions = parse_input_actions(args.actions)
+        print(f"Combined actions: {combined_actions}")
+        input_cmd(combined_actions, args.sleep, args.duration, args.doubleclick_interval, args.confidence, args.grayscale, args.typing_interval, args.press_interval)
     else:
         logger.error("Invalid command")
         exit(1)
