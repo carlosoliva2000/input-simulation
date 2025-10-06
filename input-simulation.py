@@ -140,13 +140,31 @@ PROBLEMATIC_CHARS = set("@|#$%&/()=?¡¿'\"\\[]{}^`~¬¨*+-_:;<>")
 # Logging setup
 
 format_str = "%(asctime)s [PID %(process)d] - %(funcName)s - %(levelname)s - %(message)s"
+class LevelBasedFormatter(logging.Formatter):
+    """Custom formatter to change format based on log level."""
+    def format(self, record):
+        if record.levelno == logging.INFO:
+            fmt = "%(message)s"
+        else:
+            fmt = format_str
+        formatter = logging.Formatter(fmt)
+        return formatter.format(record)
+
+
 formatter = logging.Formatter(format_str)
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
 
 console_handler = logging.StreamHandler()
-console_handler.setFormatter(formatter)
-console_handler.setLevel(logging.WARNING)
 logger.addHandler(console_handler)
+
+file_handler = RotatingFileHandler(
+    os.path.join(os.path.expanduser(LOG_PATH), 'input-simulation.log'),
+    maxBytes=1024*1024, 
+    backupCount=3
+)
+file_handler.setFormatter(formatter)
+logger.addHandler(file_handler)
 
 
 
@@ -680,21 +698,11 @@ def main():
 
     args, unknown = parser.parse_known_args()
 
-    file_handler = RotatingFileHandler(
-        os.path.join(os.path.expanduser(LOG_PATH), 'input-simulation.log'),
-        maxBytes=1024*1024, 
-        backupCount=3
-    )
-    file_handler.setFormatter(formatter)
-    file_handler.setLevel(logging.INFO)
-    logger.addHandler(file_handler)
-
     if args.debug:
-        logger.setLevel(logging.DEBUG)
-        console_handler.setLevel(logging.DEBUG)
-        file_handler.setLevel(logging.DEBUG)
+        console_handler.setFormatter(formatter)
     else:
-        logger.setLevel(logging.INFO)
+        console_handler.setFormatter(LevelBasedFormatter())
+        console_handler.setLevel(logging.INFO)
     
     logger.info("Starting input-simulation")
     if unknown:
