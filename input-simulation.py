@@ -10,9 +10,11 @@ import enum
 
 from sys import exit
 from typing import Tuple, List, Union
+from filelock import FileLock
 from logging.handlers import RotatingFileHandler
 
 
+LOCK = FileLock(os.path.join("/", "opt", "scripts", ".gui.lock"))
 path = os.path.join(os.path.expanduser('~'), ".config", "input-simulation")
 os.makedirs(path, exist_ok=True)
 
@@ -137,7 +139,7 @@ PROBLEMATIC_CHARS = set("@|#$%&/()=?¡¿'\"\\[]{}^`~¬¨*+-_:;<>")
 
 # Logging setup
 
-format_str = "%(asctime)s - %(funcName)s - %(levelname)s - %(message)s"
+format_str = "%(asctime)s [PID %(process)d] - %(funcName)s - %(levelname)s - %(message)s"
 formatter = logging.Formatter(format_str)
 logger = logging.getLogger(__name__)
 
@@ -447,6 +449,7 @@ def parse_input_actions(
 
 # Command functions
 
+@LOCK
 def mouse_cmd(
     actions: Tuple[str, Tuple],
     sleep_time: float=DEFAULT_SLEEP_TIME,
@@ -502,6 +505,7 @@ def mouse_cmd(
                 time.sleep(sleep_time)
 
 
+@LOCK
 def keyboard_cmd(
     actions: Tuple[str, Union[str, Tuple]],
     sleep_time: float=DEFAULT_SLEEP_TIME,
@@ -556,6 +560,7 @@ def keyboard_cmd(
                 time.sleep(sleep_time)
 
 
+@LOCK
 def input_cmd(
     actions: List[Tuple[str, Union[str, Tuple]]],
     sleep_time: float=DEFAULT_SLEEP_TIME,
@@ -704,21 +709,25 @@ def main():
         if not check_mouse_args(args):
             exit(1)
         mouse_actions = parse_mouse_actions(args.actions, images_path=args.images_path)
+        logger.debug(f"Trying to acquire lock on {LOCK.lock_file}")
         mouse_cmd(mouse_actions, args.sleep, args.duration, args.doubleclick_interval)
     elif args.command == "keyboard":
         if not check_keyboard_args(args):
             exit(1)
         keyboard_actions = parse_keyboard_actions(args.actions, files_path=args.files_path)
+        logger.debug(f"Trying to acquire lock on {LOCK.lock_file}")
         keyboard_cmd(keyboard_actions, args.sleep, args.typing_interval, args.press_interval)
     elif args.command == "input":
         if not check_mouse_args(args) or not check_keyboard_args(args):
             exit(1)
         combined_actions = parse_input_actions(args.actions, images_path=args.images_path, files_path=args.files_path)
+        logger.debug(f"Trying to acquire lock on {LOCK.lock_file}")
         input_cmd(combined_actions, args.sleep, args.duration, args.doubleclick_interval, args.confidence, args.grayscale, args.typing_interval, args.press_interval)
     else:
         logger.error("Invalid command")
         exit(1)
-
+    
+    logger.debug(f"Lock released on {LOCK.lock_file}")
     logger.info("Finishing input-simulation")
 
 
