@@ -15,8 +15,8 @@ from logging.handlers import RotatingFileHandler
 
 
 LOCK = FileLock(os.path.join("/", "opt", "scripts", ".gui.lock"))
-path = os.path.join(os.path.expanduser('~'), ".config", "input-simulation")
-os.makedirs(path, exist_ok=True)
+LOG_PATH = os.path.join(os.path.expanduser('~'), ".config", "input-simulation")
+os.makedirs(LOG_PATH, exist_ok=True)
 
 try:
     import pyautogui
@@ -25,7 +25,7 @@ except Exception as e:
     import traceback
     import datetime
 
-    error_file = os.path.join(path, "error_input-simulation.log")
+    error_file = os.path.join(LOG_PATH, "error_input-simulation.log")
     with open(error_file, "a") as file:
         file.write("Date and time: \n")
         file.write(str(datetime.datetime.now()))
@@ -681,7 +681,7 @@ def main():
     args, unknown = parser.parse_known_args()
 
     file_handler = RotatingFileHandler(
-        os.path.join(os.path.expanduser(path), 'input-simulation.log'),
+        os.path.join(os.path.expanduser(LOG_PATH), 'input-simulation.log'),
         maxBytes=1024*1024, 
         backupCount=3
     )
