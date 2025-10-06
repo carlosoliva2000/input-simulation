@@ -248,9 +248,15 @@ def validate_keyboard_action(action: str) -> str:
         raise ValueError(f"Invalid action '{action}'. Use {KEYBOARD_ACTIONS_STR}.")
     
 
-def validate_file_path(path: str) -> str:
+def validate_file_path(path: str, directory: Union[str, None]=None) -> str:
     """Validates if a path is a valid file path and returns the absolute path."""
-    path = os.path.abspath(os.path.expanduser(path))
+    logger.debug(f"Validating file path: {path} with directory: {directory}")
+    if directory:
+        directory = os.path.abspath(os.path.expanduser(directory))
+        path = os.path.join(directory, path)
+    else:
+        path = os.path.abspath(os.path.expanduser(path))
+    
     if not os.path.isfile(path):
         raise ValueError(f"File '{path}' does not exist.")
     return path
@@ -305,7 +311,10 @@ def check_keyboard_args(args) -> bool:
 
 # Parsers
 
-def parse_mouse_actions(actions_str: str) -> List[Tuple[str, Tuple]]:
+def parse_mouse_actions(
+    actions_str: str,
+    images_path: Union[str, None]=None
+) -> List[Tuple[str, Tuple]]:
     """Converts a string of mouse actions into a list of tuples with action and arguments."""
     logger.debug(f"Parsing mouse actions: {actions_str}")
     actions = []
@@ -325,7 +334,7 @@ def parse_mouse_actions(actions_str: str) -> List[Tuple[str, Tuple]]:
                     args = tuple()
                 else:  # Move to image
                     action = MouseAction.MOVE
-                    args = (validate_file_path(parts[0]),)
+                    args = (validate_file_path(parts[0], images_path),)
             # If action has 2 parts, it must be one of:
             # - S,seconds -> sleep
             # - x,y -> left click
@@ -341,7 +350,7 @@ def parse_mouse_actions(actions_str: str) -> List[Tuple[str, Tuple]]:
                     args = validate_coordinates(parts[0], parts[1])
                 else:
                     action = validate_mouse_action(parts[0])
-                    args = (validate_file_path(parts[1]),)
+                    args = (validate_file_path(parts[1], images_path),)
             # If action has 3 parts, it must be btn,x,y or M,x,y
             elif len(parts) == 3:
                 btn, x, y = parts
@@ -357,7 +366,11 @@ def parse_mouse_actions(actions_str: str) -> List[Tuple[str, Tuple]]:
     return actions
 
 
-def parse_keyboard_actions(actions_str: str, from_input=False) -> List[Tuple[str, Union[str, Tuple]]]:
+def parse_keyboard_actions(
+    actions_str: str, 
+    files_path: Union[str, None]=None,
+    from_input=False
+) -> List[Tuple[str, Union[str, Tuple]]]:
     """Converts a string of keyboard actions into a list of tuples with action and arguments."""
     logger.debug(f"Parsing keyboard actions: {actions_str}")
     actions = []
@@ -390,7 +403,7 @@ def parse_keyboard_actions(actions_str: str, from_input=False) -> List[Tuple[str
                 args = (args,)
             elif action.upper() in KEYBOARD_TYPEFILE_ACTIONS_LIST:
                 action = KeyboardAction.TYPEFILE
-                args = (validate_file_path(args),)
+                args = (validate_file_path(args, files_path),)
             else:
                 raise ValueError(f"Invalid action '{action}'. Use {KEYBOARD_ACTIONS_STR}.")
 
@@ -402,7 +415,11 @@ def parse_keyboard_actions(actions_str: str, from_input=False) -> List[Tuple[str
     return actions
 
 
-def parse_input_actions(actions_str: str) -> List[Tuple[str, Union[str, Tuple]]]:
+def parse_input_actions(
+    actions_str: str,
+    images_path: Union[str, None]=None,
+    files_path: Union[str, None]=None
+) -> List[Tuple[str, Union[str, Tuple]]]:
     """Converts a string of mixed mouse and keyboard actions into a list of tuples with action type and action."""
     logger.debug(f"Parsing input actions: {actions_str}")
     combined_actions = []
@@ -414,10 +431,10 @@ def parse_input_actions(actions_str: str) -> List[Tuple[str, Union[str, Tuple]]]
             logger.debug(f"Processing item: {item}")
             item_split = item.split(",", 1)
             if len(item_split) == 1 or item_split[0].upper() in MOUSE_ACTIONS_LIST:
-                mouse_action = parse_mouse_actions(item)
+                mouse_action = parse_mouse_actions(item, images_path=images_path)
                 combined_actions.append((ActionType.MOUSE, mouse_action))
             elif item.split(",", 1)[0].upper() in KEYBOARD_ACTIONS_LIST:
-                keyboard_action = parse_keyboard_actions(item, from_input=True)
+                keyboard_action = parse_keyboard_actions(item, files_path=files_path, from_input=True)
                 combined_actions.append((ActionType.KEYBOARD, keyboard_action))
             else:
                 raise ValueError("Unknow action. Use mouse or keyboard actions.")
@@ -603,6 +620,7 @@ def main():
     mouse_parser.add_argument("--confidence", type=float, help="Confidence level (0.0 to 1.0) for image recognition. Defaults to 0.8.", default=DEFAULT_CONFIDENCE, required=False)
     mouse_parser.add_argument("--grayscale", action="store_true", help="Use grayscale for image recognition. This is the default option.", default=DEFAULT_GRAYSCALE, required=False)
     mouse_parser.add_argument("--no-grayscale", action="store_false", dest="grayscale", help="Do not use grayscale for image recognition.", required=False)
+    mouse_parser.add_argument("--images-path", type=str, help="Path to a directory where images used for image recognition are stored. If set, image paths in actions can be relative to this path.", default=None, required=False)
     mouse_parser.add_argument("--debug", action="store_true", help="Enable debug mode.", required=False)
 
     # Keyboard command
@@ -626,6 +644,7 @@ def main():
                                  "Values lower than 0.05s may cause issues on some systems (such as missing characters).", 
                                  default=DEFAULT_TYPING_INTERVAL, required=False)
     keyboard_parser.add_argument("--press-interval", type=float, help="Time in seconds (float) between each key press when pressing keys multiple times. Defaults to 0.0s", default=DEFAULT_PRESS_INTERVAL, required=False)
+    keyboard_parser.add_argument("--files-path", type=str, help="Path to a directory where text files used for typing are stored. If set, file paths in actions can be relative to this path.", default=None, required=False)
     keyboard_parser.add_argument("--debug", action="store_true", help="Enable debug mode.", required=False)
 
     # Input command (combined mouse and keyboard)
@@ -643,11 +662,13 @@ def main():
     input_parser.add_argument("--confidence", type=float, help="Confidence level (0.0 to 1.0) for image recognition. Defaults to 0.8.", default=DEFAULT_CONFIDENCE, required=False)
     input_parser.add_argument("--grayscale", action="store_true", help="Use grayscale for image recognition. This is the default option.", default=DEFAULT_GRAYSCALE, required=False)
     input_parser.add_argument("--no-grayscale", action="store_false", dest="grayscale", help="Do not use grayscale for image recognition.", required=False)
+    input_parser.add_argument("--images-path", type=str, help="Path to a directory where images used for image recognition are stored. If set, image paths in actions can be relative to this path.", default=None, required=False)
     input_parser.add_argument("--typing-interval", type=float, help="Time in seconds (float) between each character when typing a string. Defaults to 0.05s. "
                                  "Minimum is 0.025s, lower values will type the whole string at once. "
                                  "Values lower than 0.05s may cause issues on some systems (such as missing characters).", 
                                  default=DEFAULT_TYPING_INTERVAL, required=False)
     input_parser.add_argument("--press-interval", type=float, help="Time in seconds (float) between each key press when pressing keys multiple times. Defaults to 0.0s", default=DEFAULT_PRESS_INTERVAL, required=False)
+    input_parser.add_argument("--files-path", type=str, help="Path to a directory where text files used for typing are stored. If set, file paths in actions can be relative to this path.", default=None, required=False)
     input_parser.add_argument("--debug", action="store_true", help="Enable debug mode.", required=False)
 
 
@@ -681,17 +702,17 @@ def main():
     if args.command == "mouse":
         if not check_mouse_args(args):
             exit(1)
-        mouse_actions = parse_mouse_actions(args.actions)
+        mouse_actions = parse_mouse_actions(args.actions, images_path=args.images_path)
         mouse_cmd(mouse_actions, args.sleep, args.duration, args.doubleclick_interval)
     elif args.command == "keyboard":
         if not check_keyboard_args(args):
             exit(1)
-        keyboard_actions = parse_keyboard_actions(args.actions)
+        keyboard_actions = parse_keyboard_actions(args.actions, files_path=args.files_path)
         keyboard_cmd(keyboard_actions, args.sleep, args.typing_interval, args.press_interval)
     elif args.command == "input":
         if not check_mouse_args(args) or not check_keyboard_args(args):
             exit(1)
-        combined_actions = parse_input_actions(args.actions)
+        combined_actions = parse_input_actions(args.actions, images_path=args.images_path, files_path=args.files_path)
         input_cmd(combined_actions, args.sleep, args.duration, args.doubleclick_interval, args.confidence, args.grayscale, args.typing_interval, args.press_interval)
     else:
         logger.error("Invalid command")
