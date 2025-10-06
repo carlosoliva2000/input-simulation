@@ -577,8 +577,9 @@ def input_cmd(
         else:
             logger.error(f"Unknown action type '{action_type}' in input_cmd.")
             exit(1)
-        
-        if sleep_time > 0.0 and i < len(actions) - 1:  # No sleep after the last action
+
+        is_sleep_action = action[0][0] in (MOUSE_SLEEP_ACTIONS_LIST if action_type == ActionType.MOUSE else KEYBOARD_SLEEP_ACTIONS_LIST)
+        if not is_sleep_action and sleep_time > 0.0 and i < len(actions) - 1:  # No sleep after the last action
             logger.debug(f"Waiting {sleep_time} seconds after the last action of type {action_type}.")
             time.sleep(sleep_time)
 
